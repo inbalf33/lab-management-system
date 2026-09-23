@@ -281,7 +281,8 @@ def get_all_or_filtered_students(
     """
     שליפת רשימת סטודנטים:
     - אדמין: רואה את כולם (או סינון לפי lab_id אם התקבל).
-    - מרצה/מדריך: רואה רק את הסטודנטים בקבוצות המעבדה המשויכות אליו (או סינון מדויק אם התקבל lab_id תקין).
+    - מרצה: רואה את הסטודנטים בכל הקבוצות שבהן הוא מוגדר כמרצה.
+    - מדריך: רואה רק את הסטודנטים בקבוצות שבהן הוא מוגדר כמדריך.
     """
     
     # בסיס השאילתה - שליפת משתמשים מטבלת הקשר יחד עם פרטי המעבדה, הצוות וקוד הקבוצה
@@ -294,16 +295,30 @@ def get_all_or_filtered_students(
         User.is_miluim,
         group_students.c.team_code,
         group_students.c.group_id,
-        LabGroup.group_code  # הוספת קוד הקבוצה מהטבלה
+        LabGroup.group_code  
     ).join(
         group_students, User.user_id == group_students.c.student_id
     ).join(
         LabGroup, group_students.c.group_id == LabGroup.group_id  # חיבור לטבלת המעבדות כדי לשלוף את ה-group_code
     )
 
-    # סינון לפי הרשאות משתמש (נשמר בדיוק כמו שהיה!)
-    if current_user.role in ["lecturer", "instructor"]:
-        authorized_lab_ids = [g.group_id for g in current_user.lab_groups]
+    # סינון לפי הרשאות משתמש בצורה מדויקת מול בסיס הנתונים
+    if current_user.role == "instructor":
+        # מדריך רואה רק קבוצות שבהן הוא מוגדר כמדריך
+        authorized_labs = db.query(LabGroup.group_id).filter(LabGroup.instructor_id == current_user.user_id).all()
+        authorized_lab_ids = [g.group_id for g in authorized_labs]
+        
+        if lab_id:
+            if lab_id not in authorized_lab_ids:
+                raise HTTPException(status_code=403, detail="אין הרשאה לצפות בסטודנטים של מעבדה זו")
+            query = query.filter(group_students.c.group_id == lab_id)
+        else:
+            query = query.filter(group_students.c.group_id.in_(authorized_lab_ids))
+
+    elif current_user.role == "lecturer":
+        # מרצה רואה את כל הקבוצות שבהן הוא מוגדר כמרצה
+        authorized_labs = db.query(LabGroup.group_id).filter(LabGroup.lecturer_id == current_user.user_id).all()
+        authorized_lab_ids = [g.group_id for g in authorized_labs]
         
         if lab_id:
             if lab_id not in authorized_lab_ids:
@@ -320,7 +335,6 @@ def get_all_or_filtered_students(
 
     # המרה לפורמט שהסכימה מצפה לו (כולל group_code)
     result = []
-    seen_students = set() # למניעת כפילויות במידת הצורך
     
     for s in students_query:
         result.append({
@@ -332,10 +346,11 @@ def get_all_or_filtered_students(
             "is_miluim": s.is_miluim,
             "team_code": s.team_code,
             "lab_id": s.group_id,
-            "group_code": s.group_code  # מועבר החוצה כדי שה-Frontend יציג את שם הקבוצה (כמו C-A1)
+            "group_code": s.group_code  
         })
         
     return result
+
 
 # Get specific student details within a lab group
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import datetime, timezone
 
@@ -88,15 +88,7 @@ class GradeTeamBatchRequest(BaseModel):
     internal_notes: Optional[str] = Field("הוזן בהזנה קבוצתית", description="הערות פנימיות")
     student_feedback: Optional[str] = None
 
-class GradeTeamBatchRequest(BaseModel):
-    schedule_id: int
-    team_code: str = Field(..., description="קוד הצוות, למשל A1, B1")
-    attendance_status: str = Field("present", description="present / absent / miluim / justified")
-    lab_work_grade: Optional[int] = Field(None, ge=0, le=100)
-    prep_report_grade: Optional[int] = Field(None, ge=0, le=100)
-    summary_report_grade: Optional[int] = Field(None, ge=0, le=100)
-    internal_notes: Optional[str] = Field("הוזן בהזנה קבוצתית", description="הערות פנימיות")
-    student_feedback: Optional[str] = None
+
    
 class GradeBatchRequest(BaseModel):
     schedule_id: int
