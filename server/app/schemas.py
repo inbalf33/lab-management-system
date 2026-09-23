@@ -142,6 +142,7 @@ class LabScheduleCreate(LabScheduleBase):
 
 class LabScheduleResponse(LabScheduleBase):
     schedule_id: int
+    topic_name: Optional[str] = None
 
     class Config:
         from_attributes = True

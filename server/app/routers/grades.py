@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import datetime, timezone
 
@@ -88,15 +88,7 @@ class GradeTeamBatchRequest(BaseModel):
     internal_notes: Optional[str] = Field("הוזן בהזנה קבוצתית", description="הערות פנימיות")
     student_feedback: Optional[str] = None
 
-class GradeTeamBatchRequest(BaseModel):
-    schedule_id: int
-    team_code: str = Field(..., description="קוד הצוות, למשל A1, B1")
-    attendance_status: str = Field("present", description="present / absent / miluim / justified")
-    lab_work_grade: Optional[int] = Field(None, ge=0, le=100)
-    prep_report_grade: Optional[int] = Field(None, ge=0, le=100)
-    summary_report_grade: Optional[int] = Field(None, ge=0, le=100)
-    internal_notes: Optional[str] = Field("הוזן בהזנה קבוצתית", description="הערות פנימיות")
-    student_feedback: Optional[str] = None
+
    
 class GradeBatchRequest(BaseModel):
     schedule_id: int
@@ -222,6 +214,20 @@ def get_my_grades(
 
     return grades
 
+@router.get("/my-completed-schedule-ids", response_model=List[int], status_code=status.HTTP_200_OK)
+def get_my_completed_schedule_ids(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Only students can access this")
+
+  
+    completed_schedules = db.query(Grade.schedule_id).filter(
+        Grade.student_id == current_user.user_id
+    ).all()
+
+    return [s[0] for s in completed_schedules]
 
 # Get final course grades for the currently logged-in student (only if approved/published)
 
