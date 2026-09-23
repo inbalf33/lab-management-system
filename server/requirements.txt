@@ -78,3 +78,4 @@ yarl==1.24.5
 zstandard==0.25.0
 bcrypt
 PyJWT
+email-validator
