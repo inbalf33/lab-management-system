@@ -1,4 +1,6 @@
+import os
 from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.database import get_db
@@ -30,6 +32,18 @@ app.include_router(cms.router, prefix="/api/cms", tags=["Cms"])
 # רישום ה-Middleware מתוך ה-Service
 app.middleware("http")(get_logger_middleware())
 
+
+# CORS
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,     
+    allow_credentials=True,     
+    allow_methods=["*"],       
+    allow_headers=["*"],       
+)
 
 ####################
 

@@ -87,6 +87,7 @@ class SwapRequestCreateSchema(BaseModel):
     current_schedule_id: int = Field(..., description="מזהה הלוז הנוכחי של הסטודנט")
     target_schedule_id: int = Field(..., description="מזהה הלוז המבוקש להחלפה")
     reason: str = Field(..., min_length=3, description="חובה לציין את סיבת ההחלפה")
+    is_team_swap: bool = Field(True, description="האם ההחלפה היא צוותית (True) או אישית (False)")
 
 
 
@@ -94,8 +95,11 @@ class SwapRequestCreateSchema(BaseModel):
 class SwapRequestResponse(BaseModel):
     request_id: int
     student_id: int
+    student_name: Optional[str] = None # שם הסטודנט
+    team_code: Optional[str] = None    # קוד הצוות (למשל A1)
     current_schedule_id: int
     target_schedule_id: int
+    is_team_swap: bool
     status: str
     reason: str
     reviewer_notes: Optional[str] = None
@@ -105,7 +109,7 @@ class SwapRequestResponse(BaseModel):
         from_attributes = True
 
 # קלט: אישור/דחיית בקשת החלפה ע"י מרצה/אדמין
-# קלט: אישור/דחיית בקשת החלפה ע"י מרצה/אדמין
+
 class SwapApprovalSchema(BaseModel):
     approve: bool
     reviewer_notes: Optional[str] = Field(None, description="הערות המרצה/הסגל לבקשה")
@@ -292,16 +296,17 @@ def register_to_schedule(
 
 
 # Get student's schedule and swap request status
-
 @router.get("/my-registrations")
 def get_my_registrations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 1. איתור הקבוצה והצוות של הסטודנט מטבלת הקישור (Core Table)
     student_group_row = db.query(group_students).filter(group_students.c.student_id == current_user.user_id).first()
     if not student_group_row:
         return {
+            "group_code": None,
+            "group_day": None,
+            "group_time": None,
             "team_code": None,
             "regular_schedules": [],
             "completion_schedules": [],
@@ -311,12 +316,22 @@ def get_my_registrations(
     group_id = student_group_row.group_id
     team_code = student_group_row.team_code
 
-    # 2. שליפת הלו"ז המקורי והקבוע של כל הקבוצה
-    regular_schedules = db.query(LabSchedule).filter(
+    # שליפת פרטי קבוצת המעבדה מטבלת LabGroup (כולל day ו־time)
+    group_obj = db.query(LabGroup).filter(LabGroup.group_id == group_id).first()
+    group_code = group_obj.group_code if group_obj else None
+    group_day = group_obj.day if group_obj else None
+    group_time = group_obj.time if group_obj else None
+
+    regular_schedules_raw = db.query(LabSchedule).filter(
         LabSchedule.group_id == group_id
     ).all()
 
-    # 3. איסוף כל מזהי הסטודנטים שנמצאים באותו צוות (נועד לאפשר שקיפות בבקשות צוותיות)
+    regular_schedules = []
+    for sch in regular_schedules_raw:
+        sch_dict = LabScheduleResponse.from_orm(sch).dict()
+        sch_dict["topic_name"] = sch.topic.topic_name if sch.topic else f"נושא {sch.topic_id}"
+        regular_schedules.append(sch_dict)
+
     team_student_ids = [current_user.user_id]
     if team_code:
         team_rows = db.query(group_students.c.student_id).filter(
@@ -325,25 +340,38 @@ def get_my_registrations(
         ).all()
         team_student_ids = [row.student_id for row in team_rows]
 
-    # 4. שליפת בקשות: גם בקשות אישיות של המשתמש וגם בקשות צוותיות של שותפו לצוות
-    swap_requests = db.query(SwapRequest).filter(
+    swap_requests_raw = db.query(SwapRequest).filter(
         (SwapRequest.student_id == current_user.user_id) | 
         (SwapRequest.student_id.in_(team_student_ids) & (SwapRequest.is_team_swap == True))
     ).all()
 
-    # 5. שליפת פרטי מועדי היעד/ההשלמה שאליהם הוגשו הבקשות (עבור הצגה ב-UI)
-    target_schedule_ids = [req.target_schedule_id for req in swap_requests]
-    completion_schedules = []
-    if target_schedule_ids:
-        completion_schedules = db.query(LabSchedule).filter(
-            LabSchedule.schedule_id.in_(target_schedule_ids)
-        ).all()
+    swap_requests = []
+    for req in swap_requests_raw:
+        curr_sch = db.query(LabSchedule).filter(LabSchedule.schedule_id == req.current_schedule_id).first()
+        target_sch = db.query(LabSchedule).filter(LabSchedule.schedule_id == req.target_schedule_id).first()
+        
+        swap_requests.append({
+            "request_id": req.request_id,
+            "status": req.status,
+            "reason": req.reason,
+            "reviewer_notes": req.reviewer_notes,
+            "current_schedule_id": req.current_schedule_id, # <--- הוסיפי את זה לנוחות ההתאמה
+            "target_schedule_id": req.target_schedule_id,   # <--- הוסיפי את זה לנוחות ההתאמה
+            "current_date": curr_sch.lab_date if curr_sch else None,
+            "current_topic_name": curr_sch.topic.topic_name if curr_sch and curr_sch.topic else "מעבדה",
+            "target_date": target_sch.lab_date if target_sch else None,
+            "target_topic_name": target_sch.topic.topic_name if target_sch and target_sch.topic else "מעבדה יעד",
+            # "target_time": target_sch.group.time if target_sch and target_sch.group else None
+        })
 
     return {
+        "group_code": group_code,
+        "group_day": group_day,
+        "group_time": group_time,
         "team_code": team_code,
-        "regular_schedules": regular_schedules,        # הלו"ז המקורי של הקבוצה
-        "completion_schedules": completion_schedules,   # מועדי היעד/השלמה שנרשם אליהם
-        "swap_requests": swap_requests                 # כל הבקשות והסטטוסים (PENDING, APPROVED...)
+        "regular_schedules": regular_schedules,
+        "completion_schedules": [],
+        "swap_requests": swap_requests
     }
 
 # Cancel a pending swap request
@@ -409,7 +437,63 @@ def get_all_swap_requests(
             ))
         )
 
-    return query.all()
+    requests_raw = query.all()
+    response_data = []
+
+    for req in requests_raw:
+        # שליפת שם הסטודנט מטבלת Users (נניח ויש שדה full_name או name)
+        student_obj = db.query(User).filter(User.user_id == req.student_id).first()
+        student_name = getattr(student_obj, "full_name", None) or getattr(student_obj, "name", "סטודנט")
+
+        # שליפת קוד הצוות של הסטודנט מטבלת group_students
+        group_student_row = db.query(group_students).filter(
+            group_students.c.student_id == req.student_id
+        ).first()
+        team_code = group_student_row.team_code if group_student_row else None
+
+        # בניית אובייקט התשובה המלא לסכמה
+        req_dict = {
+            "request_id": req.request_id,
+            "student_id": req.student_id,
+            "student_name": student_name,
+            "team_code": team_code,
+            "current_schedule_id": req.current_schedule_id,
+            "target_schedule_id": req.target_schedule_id,
+            "is_team_swap": req.is_team_swap,
+            "status": req.status,
+            "reason": req.reason,
+            "reviewer_notes": req.reviewer_notes,
+            "created_at": req.created_at
+        }
+        response_data.append(req_dict)
+
+    return response_data
+
+# @router.get("/swap-requests", response_model=List[SwapRequestResponse])
+# def get_all_swap_requests(
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(require_roles(["admin", "lecturer", "instructor"]))
+# ):
+#     query = db.query(SwapRequest)
+
+#     # סינון מבוסס תפקיד עבור מרצים ומדריכים (אדמין מקבל הכל)
+#     if current_user.role in ["lecturer", "instructor"]:
+#         role_column = LabGroup.lecturer_id if current_user.role == "lecturer" else LabGroup.instructor_id
+        
+#         group_ids = db.query(LabGroup.group_id).filter(
+#             role_column == current_user.user_id
+#         ).subquery()
+        
+#         query = query.filter(
+#             (SwapRequest.current_schedule_id.in_(
+#                 db.query(LabSchedule.schedule_id).filter(LabSchedule.group_id.in_(group_ids))
+#             )) |
+#             (SwapRequest.target_schedule_id.in_(
+#                 db.query(LabSchedule.schedule_id).filter(LabSchedule.group_id.in_(group_ids))
+#             ))
+#         )
+
+#     return query.all()
 
 
 @router.post("/swap-requests/{id}/approve")

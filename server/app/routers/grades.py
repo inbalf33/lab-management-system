@@ -222,6 +222,20 @@ def get_my_grades(
 
     return grades
 
+@router.get("/my-completed-schedule-ids", response_model=List[int], status_code=status.HTTP_200_OK)
+def get_my_completed_schedule_ids(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Only students can access this")
+
+  
+    completed_schedules = db.query(Grade.schedule_id).filter(
+        Grade.student_id == current_user.user_id
+    ).all()
+
+    return [s[0] for s in completed_schedules]
 
 # Get final course grades for the currently logged-in student (only if approved/published)
 
