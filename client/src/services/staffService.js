@@ -8,7 +8,7 @@ export const getSwapRequests = async (filters = {}) => {
 };
 
 export const updateSwapRequestStatus = async (requestId, approve, reviewerNotes = '') => {
-  const response = await api.post(`/api/swap-requests/${requestId}/approve`, {
+  const response = await api.post(`/api/schedules/swap-requests/${requestId}/approve`, {
     approve: approve,
     reviewer_notes: reviewerNotes
   });
